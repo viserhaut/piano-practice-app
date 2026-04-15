@@ -22,13 +22,64 @@
     </div>
   </header>
 
-  <!-- メインエリア（将来の楽譜表示・フェーズ2以降） -->
+  <!-- メインエリア -->
   <main>
-    <div id="freeplay-area">
-      <h2>フリープレイモード</h2>
-      <p>鍵盤を弾くと下のキーボードに表示されます</p>
-      <div id="note-display">—</div>
+
+    <!-- モード切り替えタブ -->
+    <div id="mode-switcher">
+      <button id="btn-mode-freeplay" class="mode-btn active">フリープレイ</button>
+      <button id="btn-mode-quiz"     class="mode-btn">音符クイズ</button>
     </div>
+
+    <!-- モードコンテンツ -->
+    <div id="mode-content">
+
+      <!-- フリープレイ -->
+      <div id="freeplay-area">
+        <h2>フリープレイモード</h2>
+        <p>鍵盤を弾くと下のキーボードに表示されます</p>
+        <div id="note-display">—</div>
+      </div>
+
+      <!-- 音符クイズ -->
+      <div id="quiz-area" style="display:none;">
+        <!-- スタート画面 -->
+        <div id="quiz-start">
+          <h2>音符クイズ</h2>
+          <p>音符が表示されたら、対応する鍵盤をすばやく押してください。</p>
+          <p class="quiz-sub">C4〜G5（ト音記号）· 全20問 · 苦手な音符が多く出題されます</p>
+          <button id="btn-quiz-start" class="btn btn-primary btn-large">スタート</button>
+        </div>
+
+        <!-- クイズ進行中 -->
+        <div id="quiz-playing" style="display:none;">
+          <!-- 統計バー -->
+          <div id="quiz-stats">
+            <span id="stat-count">0 / 20</span>
+            <span id="stat-correct" class="stat-correct">✓ 0</span>
+            <span id="stat-wrong"   class="stat-wrong">✗ 0</span>
+            <span id="stat-time">—</span>
+          </div>
+
+          <!-- 五線譜 Canvas -->
+          <div id="quiz-canvas-wrap">
+            <canvas id="quiz-canvas"></canvas>
+          </div>
+
+          <!-- フィードバックメッセージ -->
+          <div id="quiz-feedback"></div>
+        </div>
+
+        <!-- セッション終了サマリー -->
+        <div id="quiz-summary" style="display:none;">
+          <h2>お疲れさまでした！</h2>
+          <div id="summary-stats"></div>
+          <div id="summary-weak"></div>
+          <button id="btn-quiz-retry" class="btn btn-primary btn-large">もう一度</button>
+        </div>
+      </div>
+
+    </div><!-- /mode-content -->
   </main>
 
   <!-- バーチャルキーボード -->
@@ -81,6 +132,7 @@
 
   <script src="midi-handler.js"></script>
   <script src="renderer.js"></script>
+  <script src="quiz-mode.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
