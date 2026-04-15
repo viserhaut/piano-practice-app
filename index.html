@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Piano Practice</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/midi-parser-js@4.0.6/src/midi-parser.js"></script>
+</head>
+<body>
+
+  <!-- ヘッダー -->
+  <header>
+    <div class="header-left">
+      <span class="app-title">🎹 Piano Practice</span>
+    </div>
+    <div class="header-right">
+      <span id="midi-status" class="status disconnected">未接続</span>
+      <button id="btn-connect" class="btn btn-primary">MIDI接続</button>
+      <button id="btn-notename" class="btn btn-secondary" title="音名の表示切り替え">ドレミ</button>
+      <button id="btn-help" class="btn btn-icon" title="接続ガイド">?</button>
+    </div>
+  </header>
+
+  <!-- メインエリア（将来の楽譜表示・フェーズ2以降） -->
+  <main>
+    <div id="freeplay-area">
+      <h2>フリープレイモード</h2>
+      <p>鍵盤を弾くと下のキーボードに表示されます</p>
+      <div id="note-display">—</div>
+    </div>
+  </main>
+
+  <!-- バーチャルキーボード -->
+  <div id="keyboard-container">
+    <canvas id="keyboard-canvas"></canvas>
+  </div>
+
+  <!-- Bluetooth接続ガイド モーダル -->
+  <div id="modal-help" class="modal" style="display:none;" role="dialog" aria-modal="true">
+    <div class="modal-content">
+      <button class="modal-close" id="btn-modal-close" aria-label="閉じる">✕</button>
+      <h2>Bluetooth MIDI 接続ガイド</h2>
+
+      <h3>KAWAI CX302 → MacBook Air</h3>
+      <ol>
+        <li>
+          <strong>KAWAI CX302 の電源を入れる</strong><br>
+          ピアノ側の Bluetooth MIDI が有効になっていることを確認してください。
+        </li>
+        <li>
+          <strong>Mac の「Audio MIDI設定」を開く</strong><br>
+          Spotlight（⌘+スペース）→「Audio MIDI 設定」と入力して起動<br>
+          メニューバー「ウインドウ」→「Bluetooth設定を表示」
+        </li>
+        <li>
+          <strong>KAWAI CX302 を「接続」</strong><br>
+          デバイス一覧に表示されたら「接続」ボタンをクリック
+        </li>
+        <li>
+          <strong>このページで「MIDI接続」をクリック</strong><br>
+          ブラウザの許可ダイアログで「許可」を選択してください。
+        </li>
+        <li>
+          <strong>接続確認</strong><br>
+          鍵盤を押して画面のキーボードが光れば完了！
+        </li>
+      </ol>
+
+      <div class="troubleshoot">
+        <strong>うまくいかない場合</strong>
+        <ul>
+          <li>Audio MIDI設定で「接続済み」になっているか確認</li>
+          <li>Chrome または Edge を使用しているか確認（Safari は Web MIDI 非対応）</li>
+          <li>ページを再読み込みして「MIDI接続」を再クリック</li>
+          <li>USB ケーブル（USB-B → USB-A）でも接続できます</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <script src="midi-handler.js"></script>
+  <script src="renderer.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
