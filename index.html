@@ -93,47 +93,39 @@
       <button class="modal-close" id="btn-modal-close" aria-label="閉じる">✕</button>
       <h2>Bluetooth MIDI 接続ガイド</h2>
 
-      <h3>KAWAI CX302 → MacBook Air</h3>
-      <p style="font-size:13px;color:#80f080;margin-bottom:14px;">
-        ✓ CX302 は Bluetooth MIDI がデフォルトで ON です。<strong>ピアノ側の操作は不要</strong>です。
-      </p>
+      <h3>KAWAI CX302 → MacBook Air（Bluetooth MIDI）</h3>
       <ol>
         <li>
-          <strong>KAWAI CX302 の電源を入れる</strong><br>
-          それだけで自動的に Bluetooth MIDI のアドバタイズが始まります。
+          <strong>CX302 の Bluetooth を有効にする</strong><br>
+          デフォルトは OFF です。<strong>METRONOME + SOUND SELECT を同時に5秒長押し</strong>で ON になります。
         </li>
         <li>
           <strong>Mac の「Audio MIDI設定」を開く</strong><br>
-          Spotlight（⌘+スペース）→「Audio MIDI 設定」と入力して起動<br>
-          メニューバー「ウインドウ」→「Bluetooth設定を表示」
+          Spotlight（⌘+スペース）→「Audio MIDI 設定」と入力 → Enter
         </li>
         <li>
-          <strong>KAWAI CX302 を「接続」</strong><br>
-          デバイス一覧に表示されたら「接続」ボタンをクリック
+          <strong>MIDI スタジオを表示する</strong><br>
+          メニューバー「ウィンドウ」→「MIDIスタジオを表示」
+        </li>
+        <li>
+          <strong>Bluetooth 構成を開いて CX302 を「接続」</strong><br>
+          MIDIスタジオ上部の「Bluetooth」ボタンをクリック<br>
+          → CX302 が表示されたら「接続」をクリック
         </li>
         <li>
           <strong>このページで「MIDI接続」をクリック</strong><br>
-          ブラウザの許可ダイアログで「許可」を選択してください。
-        </li>
-        <li>
-          <strong>接続確認</strong><br>
-          鍵盤を押して画面のキーボードが光れば完了！
+          ブラウザの許可ダイアログで「許可」を選択<br>
+          → 自動的に「CX302 Bluetooth」と表示されれば完了！
         </li>
       </ol>
 
       <div class="troubleshoot">
-        <strong>「デバイスが見つかりません」と表示される場合（最もよくあるケース）</strong>
+        <strong>うまくいかない場合</strong>
         <ul>
-          <li>上の <strong>手順②③</strong>（Audio MIDI設定でのペアリング）がまだの可能性が高いです</li>
-          <li>Audio MIDI設定 → Bluetooth設定で CX302 が<strong>「接続済み」</strong>になっているか確認してください</li>
-          <li>ペアリング後にページを再読み込みして「MIDI接続」を再クリック</li>
-        </ul>
-        <br>
-        <strong>その他のケース</strong>
-        <ul>
-          <li>CX302 が一覧に出ない場合: <strong>METRONOME + SOUND SELECT を5秒長押し</strong>で Bluetooth ON/OFF を切り替え</li>
+          <li>CX302 が Bluetooth 構成に出ない → 手順①のボタン長押しを再試行</li>
+          <li>「デバイスが見つかりません」→ 手順④が完了しているか確認してから「MIDI接続」を再クリック</li>
           <li>Chrome または Edge を使用しているか確認（Safari は Web MIDI 非対応）</li>
-          <li>USB ケーブル（USB-B → USB-A）でも接続できます</li>
+          <li>USB ケーブル（USB-B → USB-A）でも接続できます（最も確実）</li>
         </ul>
       </div>
     </div>
