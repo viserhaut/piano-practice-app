@@ -207,9 +207,17 @@ async function _handleConnect() {
   const success = await MidiHandler.connect();
 
   el.btnConnect.disabled = false;
+
   if (!success) {
+    // requestMIDIAccess 自体が失敗（拒否 or 非対応）
     _setStatus('未接続', 'disconnected');
     el.btnConnect.textContent = 'MIDI接続';
+  } else if (!AppState.midiConnected) {
+    // 許可は得られたがデバイスが見つからない
+    _setStatus('デバイスが見つかりません', 'disconnected');
+    el.btnConnect.textContent = 'MIDI接続';
+    // 接続ガイドを自動表示して次のステップを案内
+    _openModal();
   }
 }
 
