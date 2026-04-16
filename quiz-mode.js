@@ -1,98 +1,213 @@
 // quiz-mode.js
 // 音符クイズモード — 音符 → 鍵盤の瞬間認識を訓練する
 //
-// 仕組み:
-//   1. 五線譜に音符を1つ表示する
-//   2. ユーザーが対応する鍵盤を押す
-//   3. 即座に正誤 + 応答時間を表示する
-//   4. スペースドリピティションで苦手な音符を多く出題する
+// 改善点:
+//   - ヘ音記号対応 (G2〜B3) + 記号選択 (ト音/ヘ音/両方)
+//   - デッキ方式で全音符を網羅的に出題
+//   - 隣接音符の連続出題を防止
+//   - 重みを localStorage に永続化（セッション跨ぎの個人適応学習）
 
 const QuizMode = (function () {
 
   // ============================================================
-  // 定数
+  // 音符セット
   // ============================================================
 
-  // 出題音符: C4〜G5 (バイエルレベル、ト音記号の基本音域)
-  const QUIZ_NOTES = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79];
-  //                  C4  D4  E4  F4  G4  A4  B4  C5  D5  E5  F5  G5
+  // ト音記号: C4〜G5（バイエルレベル）
+  const TREBLE_NOTES = [60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79];
+  //                    C4  D4  E4  F4  G4  A4  B4  C5  D5  E5  F5  G5
 
-  // 各 MIDI noteInOctave (0〜11) → その音の1オクターブ内の全音階順位 (0=C)
-  // 黒鍵は前の白鍵と同じ値（使う場面はないが配列インデックスを合わせるため）
+  // ヘ音記号: G2〜B3（左手の基本音域）
+  const BASS_NOTES = [43, 45, 47, 48, 50, 52, 53, 55, 57, 59];
+  //                  G2  A2  B2  C3  D3  E3  F3  G3  A3  B3
+
+  // MIDI ノートの全音階絶対値計算用
+  // 各 MIDI noteInOctave (0〜11) → 白鍵の順位 (0=C)
   const DIATONIC = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
 
-  // E4 (MIDI 64) の全音階絶対値 = 4 octaves * 7 notes + 2 (E is 3rd white key from C)
-  const E4_ABS = 4 * 7 + 2; // = 30
+  // ト音記号: E4 が下第1線 (abs=30)
+  const E4_ABS = 30;
+  // ヘ音記号: G2 が下第1線 (abs=18)
+  const G2_ABS = 18;
 
-  // 五線譜描画パラメータ
-  const LINE_SPACING = 18; // 隣接する線の間隔 (px)
-  const NOTE_RX     = LINE_SPACING * 0.50; // 符頭の横半径
-  const NOTE_RY     = LINE_SPACING * 0.38; // 符頭の縦半径
-  const NOTE_TILT   = -0.25; // 符頭の傾き (ラジアン)
+  // ============================================================
+  // 描画定数
+  // ============================================================
+  const LINE_SPACING    = 18;
+  const NOTE_RX         = LINE_SPACING * 0.50;
+  const NOTE_RY         = LINE_SPACING * 0.38;
+  const NOTE_TILT       = -0.25;
 
-  // フィードバック表示時間 (ms)
-  const FEEDBACK_CORRECT = 800;
-  const FEEDBACK_WRONG   = 1500;
-
-  // スペースドリピティション パラメータ
+  // ============================================================
+  // 学習パラメータ
+  // ============================================================
+  const FEEDBACK_CORRECT   = 800;
+  const FEEDBACK_WRONG     = 1500;
   const WEIGHT_MIN         = 0.3;
   const WEIGHT_MAX         = 5.0;
-  const WEIGHT_FAST_MUL    = 0.8;  // 正解 & 速い (< 2s)
-  const WEIGHT_SLOW_MUL    = 1.15; // 正解 & 遅い (> 4s)
-  const WEIGHT_WRONG_MUL   = 1.6;  // 不正解
+  const WEIGHT_FAST_MUL    = 0.8;   // 正解 & 速い (< 2s)
+  const WEIGHT_SLOW_MUL    = 1.15;  // 正解 & 遅い (> 4s)
+  const WEIGHT_WRONG_MUL   = 1.6;   // 不正解
   const FAST_THRESHOLD_MS  = 2000;
   const SLOW_THRESHOLD_MS  = 4000;
+  const SESSION_TOTAL      = 20;
 
-  // セッション問題数
-  const SESSION_TOTAL = 20;
+  const LS_KEY = 'piano-quiz-weights'; // localStorage キー
 
   // ============================================================
   // 状態
   // ============================================================
-  let canvas      = null;
-  let ctx         = null;
-  let styleRef    = 'doremi'; // 現在の音名スタイル (app.js と同期)
+  let canvas        = null;
+  let ctx           = null;
+  let styleRef      = 'doremi';
+  let clefMode      = 'treble'; // 'treble' | 'bass' | 'both'
 
-  let currentNote  = null;  // 現在表示中の MIDI ノート番号 (null = 待機中)
-  let startTime    = null;  // 音符を表示した時刻
-  let weights      = {};    // 各音符の重み { midiNote: number }
-  let session      = null;  // セッション統計
-  let feedbackTimer = null; // setTimeout ハンドル
+  let currentNote   = null;  // 現在表示中の MIDI ノート番号
+  let currentClef   = 'treble'; // 現在表示中の記号
+  let prevAbsStep   = null;  // 直前の音符の絶対全音階ステップ（隣接防止用）
+  let startTime     = null;
+  let weights       = {};
+  let deck          = [];    // 未出題ノートのデッキ（網羅性保証）
+  let session       = null;
+  let feedbackTimer = null;
 
-  // コールバック
-  let onAnswerCb     = null; // (correct: bool, responseMs: number, pressed: number) => void
-  let onSessionEndCb = null; // (session: object) => void
+  let onAnswerCb     = null;
+  let onSessionEndCb = null;
+
+  // ============================================================
+  // localStorage 永続化
+  // ============================================================
+
+  function _loadWeights() {
+    try {
+      const saved = localStorage.getItem(LS_KEY);
+      if (saved) weights = JSON.parse(saved);
+    } catch (e) { /* ignore */ }
+    // 全音符に重みを保証
+    [...TREBLE_NOTES, ...BASS_NOTES].forEach(n => {
+      if (typeof weights[n] !== 'number') weights[n] = 1.0;
+    });
+  }
+
+  function _saveWeights() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(weights)); } catch (e) { /* ignore */ }
+  }
+
+  // ============================================================
+  // 全音階絶対値計算（隣接防止に使用）
+  // ============================================================
+
+  function _midiToAbs(midiNote) {
+    const noteInOct = midiNote % 12;
+    const octave    = Math.floor(midiNote / 12) - 1;
+    return octave * 7 + DIATONIC[noteInOct];
+  }
+
+  // ============================================================
+  // 記号別ステップ計算（描画用）
+  // ============================================================
+
+  function _midiToStepTreble(midiNote) {
+    return _midiToAbs(midiNote) - E4_ABS;
+  }
+
+  function _midiToStepBass(midiNote) {
+    return _midiToAbs(midiNote) - G2_ABS;
+  }
+
+  // ============================================================
+  // アクティブ音符セット
+  // ============================================================
+
+  function _getActiveNotes() {
+    if (clefMode === 'treble') return TREBLE_NOTES;
+    if (clefMode === 'bass')   return BASS_NOTES;
+    return [...TREBLE_NOTES, ...BASS_NOTES];
+  }
+
+  function _clefForNote(midiNote) {
+    return BASS_NOTES.includes(midiNote) ? 'bass' : 'treble';
+  }
+
+  // ============================================================
+  // デッキ管理（網羅性保証）
+  // ============================================================
+
+  /**
+   * デッキを構築する。
+   * 全音符を 1 度ずつ含む基本デッキを重みの比率でシャッフル。
+   * 高重み音符は確率的に複数枚追加される。
+   */
+  function _buildDeck() {
+    const notes = _getActiveNotes();
+    deck = [];
+
+    notes.forEach(n => {
+      deck.push(n); // 全音符 1 回は保証
+      // 重みが 2.0 超の場合は追加出題チャンス
+      if (weights[n] >= 2.0) deck.push(n);
+      if (weights[n] >= 3.5) deck.push(n);
+    });
+
+    // Fisher-Yates シャッフル
+    for (let i = deck.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [deck[i], deck[j]] = [deck[j], deck[i]];
+    }
+  }
+
+  /**
+   * デッキから次の音符を取り出す。
+   * 制約:
+   *   1. 直前と同じ音符は不可
+   *   2. 直前と全音階上で隣接（±1ステップ）する音符は不可
+   */
+  function _sampleNote() {
+    if (deck.length === 0) _buildDeck();
+
+    // デッキ内で制約を満たす最初の候補を選ぶ
+    for (let i = 0; i < deck.length; i++) {
+      const candidate = deck[i];
+      if (candidate === currentNote) continue;
+      if (prevAbsStep !== null && Math.abs(_midiToAbs(candidate) - prevAbsStep) <= 1) continue;
+      deck.splice(i, 1);
+      return candidate;
+    }
+
+    // 全候補が制約違反なら制約を緩和（隣接のみ許可、同一音は禁止）
+    for (let i = 0; i < deck.length; i++) {
+      if (deck[i] !== currentNote) {
+        const note = deck.splice(i, 1)[0];
+        return note;
+      }
+    }
+
+    // 最終フォールバック: デッキを再構築
+    _buildDeck();
+    return deck.shift() || _getActiveNotes()[0];
+  }
 
   // ============================================================
   // 五線譜描画
   // ============================================================
 
-  /** MIDI ノート番号 → ト音記号 E4 線からの半音程ステップ数 */
-  function midiToStep(midiNote) {
-    const noteInOct = midiNote % 12;
-    const octave    = Math.floor(midiNote / 12) - 1;
-    const abs       = octave * 7 + DIATONIC[noteInOct];
-    return abs - E4_ABS;
-  }
-
-  /** 五線譜 + 音符を Canvas に描画する */
   function drawStaff() {
     if (!canvas || !ctx) return;
-
     const W = canvas.width;
     const H = canvas.height;
     ctx.clearRect(0, 0, W, H);
 
-    // 五線譜を縦方向の中心より少し上に配置
-    const staffCenterY = H * 0.48;
-    // staffCenterY は 3 本目の線 (B4) の y 座標
-    // 上から: F5(0), E5(1/2), D5(1), C5(3/2), B4(2), A4(5/2), G4(3), F4(7/2), E4(4)
-    // top line (F5) = staffCenterY - 2 * LINE_SPACING
-    const staffTop  = staffCenterY - 2 * LINE_SPACING;
-    const staffLeft = 70;
-    const staffWidth= W - staffLeft - 30;
+    const clef = (clefMode === 'both') ? (currentClef || 'treble') : clefMode;
+    _drawStaffWithClef(clef, W, H);
+  }
 
-    // 五線 (5本)
+  function _drawStaffWithClef(clef, W, H) {
+    const staffCenterY = H * 0.48;
+    const staffTop     = staffCenterY - 2 * LINE_SPACING;
+    const staffLeft    = clef === 'treble' ? 68 : 60;
+    const staffWidth   = W - staffLeft - 30;
+
+    // 五線
     ctx.strokeStyle = '#c8c8e8';
     ctx.lineWidth   = 1.5;
     for (let i = 0; i < 5; i++) {
@@ -103,33 +218,48 @@ const QuizMode = (function () {
       ctx.stroke();
     }
 
-    // ト音記号 (Unicode 𝄞 U+1D11E)
-    // 一部フォントで表示されない場合のフォールバック付き
-    ctx.font          = `${LINE_SPACING * 4.8}px 'Times New Roman', serif`;
-    ctx.fillStyle     = '#c8c8e8';
-    ctx.textAlign     = 'left';
-    ctx.textBaseline  = 'bottom';
-    ctx.fillText('\uD834\uDD1E', staffLeft + 3, staffTop + LINE_SPACING * 4.8);
+    // 記号
+    if (clef === 'treble') {
+      ctx.font         = `${LINE_SPACING * 4.8}px 'Times New Roman', serif`;
+      ctx.fillStyle    = '#c8c8e8';
+      ctx.textAlign    = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('\uD834\uDD1E', staffLeft + 3, staffTop + LINE_SPACING * 4.8);
+    } else {
+      // ヘ音記号 𝄢
+      ctx.font         = `${LINE_SPACING * 3.0}px 'Times New Roman', serif`;
+      ctx.fillStyle    = '#c8c8e8';
+      ctx.textAlign    = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('\uD834\uDD22', staffLeft + 3, staffTop + LINE_SPACING * 1.5);
+    }
 
-    // 音符を描画
+    // 「両方」モード時: 記号ラベル表示
+    if (clefMode === 'both' && currentNote !== null) {
+      const label = clef === 'treble' ? 'ト音記号' : 'ヘ音記号';
+      ctx.font         = `bold 11px sans-serif`;
+      ctx.fillStyle    = '#7a7aaa';
+      ctx.textAlign    = 'right';
+      ctx.textBaseline = 'top';
+      ctx.fillText(label, W - 8, 6);
+    }
+
+    // 音符
     if (currentNote !== null) {
-      _drawNote(currentNote, staffLeft, staffTop, staffWidth);
+      const refY  = staffTop + 4 * LINE_SPACING; // 下第1線のY座標
+      const step  = clef === 'treble'
+        ? _midiToStepTreble(currentNote)
+        : _midiToStepBass(currentNote);
+      _drawNote(step, refY, staffLeft, staffTop, staffWidth);
     }
   }
 
-  /** 1 つの音符（符頭 + 符幹 + 加線）を描画する */
-  function _drawNote(midiNote, staffLeft, staffTop, staffWidth) {
-    const step  = midiToStep(midiNote);
-
-    // E4 (step=0) の y 座標: staffTop + 4 * LINE_SPACING
-    const e4Y   = staffTop + 4 * LINE_SPACING;
-    const noteY = e4Y - step * (LINE_SPACING / 2);
+  function _drawNote(step, refY, staffLeft, staffTop, staffWidth) {
+    const noteY = refY - step * (LINE_SPACING / 2);
     const noteX = staffLeft + staffWidth * 0.58;
 
-    // 加線 (ledger lines)
-    _drawLedgerLines(step, noteX, e4Y, staffTop);
+    _drawLedgerLines(step, noteX, refY);
 
-    // 符頭
     ctx.fillStyle   = '#4A90E2';
     ctx.strokeStyle = '#4A90E2';
     ctx.lineWidth   = 1.5;
@@ -137,9 +267,9 @@ const QuizMode = (function () {
     ctx.ellipse(noteX, noteY, NOTE_RX, NOTE_RY, NOTE_TILT, 0, Math.PI * 2);
     ctx.fill();
 
-    // 符幹 (step < 4 → 上向き、それ以上 → 下向き)
+    // 符幹
     const stemLen = LINE_SPACING * 3.5;
-    ctx.lineWidth = 2;
+    ctx.lineWidth   = 2;
     ctx.strokeStyle = '#4A90E2';
     ctx.beginPath();
     if (step < 4) {
@@ -152,27 +282,23 @@ const QuizMode = (function () {
     ctx.stroke();
   }
 
-  /** 加線が必要な音符に加線を描画する */
-  function _drawLedgerLines(step, noteX, e4Y, staffTop) {
+  function _drawLedgerLines(step, noteX, refY) {
     const ledgerHalfW = NOTE_RX * 2.6;
-    ctx.strokeStyle = '#c8c8e8';
-    ctx.lineWidth   = 1.5;
+    ctx.strokeStyle   = '#c8c8e8';
+    ctx.lineWidth     = 1.5;
 
     if (step <= -2) {
-      // E4 より下 (C4 以下): ステップ -2, -4, ... に加線
       for (let s = -2; s >= step; s -= 2) {
-        const y = e4Y - s * (LINE_SPACING / 2);
+        const y = refY - s * (LINE_SPACING / 2);
         ctx.beginPath();
         ctx.moveTo(noteX - ledgerHalfW, y);
         ctx.lineTo(noteX + ledgerHalfW, y);
         ctx.stroke();
       }
     }
-
     if (step >= 10) {
-      // F5 より上: ステップ 10, 12, ... に加線
       for (let s = 10; s <= step; s += 2) {
-        const y = e4Y - s * (LINE_SPACING / 2);
+        const y = refY - s * (LINE_SPACING / 2);
         ctx.beginPath();
         ctx.moveTo(noteX - ledgerHalfW, y);
         ctx.lineTo(noteX + ledgerHalfW, y);
@@ -185,15 +311,12 @@ const QuizMode = (function () {
   // クイズロジック
   // ============================================================
 
-  /** Canvas を初期化する */
   function init(canvasEl) {
     canvas = canvasEl;
     ctx    = canvas.getContext('2d');
 
-    // 初期重み
-    QUIZ_NOTES.forEach(n => { weights[n] = 1.0; });
+    _loadWeights();
 
-    // リサイズ対応（hidden 中は offsetWidth=0 になるためスキップ）
     new ResizeObserver(() => {
       if (canvas.offsetWidth === 0) return;
       canvas.width  = canvas.offsetWidth;
@@ -206,18 +329,17 @@ const QuizMode = (function () {
     drawStaff();
   }
 
-  /** セッションを開始して最初の音符を表示する */
   function start() {
-    // 非表示中に初期化されていた場合はここで Canvas サイズを再計算
     if (canvas.offsetWidth > 0) {
       canvas.width  = canvas.offsetWidth;
       canvas.height = canvas.offsetHeight;
     }
-    session = { count: 0, correct: 0, wrong: 0, times: [] };
+    session     = { count: 0, correct: 0, wrong: 0, times: [] };
+    prevAbsStep = null;
+    _buildDeck();
     _nextNote();
   }
 
-  /** 次の音符をランダムに選んで表示する */
   function _nextNote() {
     if (feedbackTimer) { clearTimeout(feedbackTimer); feedbackTimer = null; }
 
@@ -228,34 +350,14 @@ const QuizMode = (function () {
       return;
     }
 
-    currentNote = _sampleNote();
-    startTime   = Date.now();
+    const nextMidi  = _sampleNote();
+    prevAbsStep     = currentNote !== null ? _midiToAbs(currentNote) : null;
+    currentNote     = nextMidi;
+    currentClef     = _clefForNote(nextMidi);
+    startTime       = Date.now();
     drawStaff();
   }
 
-  /**
-   * 重みに比例した確率で出題する音符を選ぶ。
-   * 直前の音符は連続しないようにする。
-   */
-  function _sampleNote() {
-    const prev  = currentNote;
-    const notes = prev !== null
-      ? QUIZ_NOTES.filter(n => n !== prev)
-      : QUIZ_NOTES;
-
-    const total = notes.reduce((s, n) => s + weights[n], 0);
-    let rand = Math.random() * total;
-    for (const note of notes) {
-      rand -= weights[note];
-      if (rand <= 0) return note;
-    }
-    return notes[notes.length - 1];
-  }
-
-  /**
-   * ユーザーが鍵盤を押したときに呼び出す。
-   * currentNote が null（フィードバック表示中）のときは無視する。
-   */
   function onNotePressed(midiNote) {
     if (!session || currentNote === null) return;
 
@@ -272,19 +374,12 @@ const QuizMode = (function () {
     }
 
     _updateWeight(answered, correct, responseMs);
-
-    // コールバック → app.js がフィードバック UI を更新する
     if (onAnswerCb) onAnswerCb(correct, responseMs, midiNote, answered);
 
-    // currentNote を null にして二重入力を防ぐ
     currentNote = null;
-
-    // フィードバック後に次の音符へ
-    const delay = correct ? FEEDBACK_CORRECT : FEEDBACK_WRONG;
-    feedbackTimer = setTimeout(_nextNote, delay);
+    feedbackTimer = setTimeout(_nextNote, correct ? FEEDBACK_CORRECT : FEEDBACK_WRONG);
   }
 
-  /** 重みを更新する（スペースドリピティション） */
   function _updateWeight(note, correct, responseMs) {
     if (!correct) {
       weights[note] = Math.min(WEIGHT_MAX, weights[note] * WEIGHT_WRONG_MUL);
@@ -293,15 +388,15 @@ const QuizMode = (function () {
     } else if (responseMs > SLOW_THRESHOLD_MS) {
       weights[note] = Math.min(WEIGHT_MAX, weights[note] * WEIGHT_SLOW_MUL);
     }
+    _saveWeights();
   }
 
   // ============================================================
   // ユーティリティ
   // ============================================================
 
-  /** 音符の名前ラベルを返す (例: "ド4", "C4") */
   function getNoteLabel(midiNote, style) {
-    const s = style || styleRef;
+    const s      = style || styleRef;
     const DOREMI = ['ド','','レ','','ミ','ファ','','ソ','','ラ','','シ'];
     const CDEFG  = ['C', '', 'D', '', 'E', 'F',  '', 'G', '', 'A', '', 'B'];
     const name   = (s === 'doremi' ? DOREMI : CDEFG)[midiNote % 12];
@@ -309,17 +404,31 @@ const QuizMode = (function () {
     return name ? `${name}${octave}` : '';
   }
 
+  function resetWeights() {
+    [...TREBLE_NOTES, ...BASS_NOTES].forEach(n => { weights[n] = 1.0; });
+    _saveWeights();
+  }
+
+  function setClefMode(mode) {
+    clefMode    = mode;
+    currentNote = null;
+    _buildDeck();
+    drawStaff();
+  }
+
   function setNoteNameStyle(style) { styleRef = style; }
-  function setOnAnswer(cb)     { onAnswerCb     = cb; }
-  function setOnSessionEnd(cb) { onSessionEndCb = cb; }
-  function getCurrentNote()    { return currentNote; }
-  function getSession()        { return session ? { ...session } : null; }
-  function getWeights()        { return { ...weights }; }
-  function isActive()          { return session !== null && session.count < SESSION_TOTAL; }
+  function setOnAnswer(cb)         { onAnswerCb     = cb; }
+  function setOnSessionEnd(cb)     { onSessionEndCb = cb; }
+  function getCurrentNote()        { return currentNote; }
+  function getSession()            { return session ? { ...session } : null; }
+  function getWeights()            { return { ...weights }; }
+  function getClefMode()           { return clefMode; }
+  function isActive()              { return session !== null && session.count < SESSION_TOTAL; }
 
   return {
     init, start, onNotePressed,
-    setNoteNameStyle, setOnAnswer, setOnSessionEnd,
+    setNoteNameStyle, setClefMode, getClefMode, resetWeights,
+    setOnAnswer, setOnSessionEnd,
     getCurrentNote, getSession, getWeights, getNoteLabel, isActive, drawStaff
   };
 })();
